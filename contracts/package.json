@@ -1,0 +1,27 @@
+{
+  "name": "ethspenda-contracts",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy-clean.ts",
+    "deploy:localhost": "hardhat run scripts/deploy-clean.ts --network localhost",
+    "deploy:base": "hardhat run scripts/deploy-clean.ts --network base",
+    "deploy:baseSepolia": "hardhat run scripts/deploy-clean.ts --network baseSepolia",
+    "node": "hardhat node",
+    "clean": "hardhat clean"
+  },
+  "keywords": ["ethereum", "smart-contracts", "defi", "mobile-money", "africa"],
+  "author": "EthSpenda Team",
+  "license": "MIT",
+  "description": "Smart contracts for EthSpenda - Instant crypto to mobile money transfers in Africa",
+  "devDependencies": {
+    "@chainlink/contracts": "^1.4.0",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.1.1",
+    "@openzeppelin/contracts": "^5.4.0",
+    "dotenv": "^17.2.2",
+    "hardhat": "^2.22.0"
+  }
+}
