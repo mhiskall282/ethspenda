@@ -1,0 +1,24 @@
+{
+  "name": "ethspenda-contracts",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js",
+    "node": "hardhat node"
+  },
+  "keywords": ["ethereum", "smart-contracts", "defi", "mobile-money", "africa"],
+  "author": "EthSpenda Team",
+  "license": "MIT",
+  "description": "Smart contracts for EthSpenda - Instant crypto to mobile money transfers in Africa",
+  "devDependencies": {
+    "@chainlink/contracts": "^1.4.0",
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@nomicfoundation/hardhat-verify": "^2.1.1",
+    "@openzeppelin/contracts": "^5.4.0",
+    "dotenv": "^17.2.2",
+    "hardhat": "^3.0.4"
+  }
+}
