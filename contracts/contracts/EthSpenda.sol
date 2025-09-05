@@ -2,11 +2,12 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title EthSpenda
@@ -155,7 +156,7 @@ contract EthSpenda is Ownable, ReentrancyGuard, Pausable {
         address _ethUsdPriceFeed,
         address _feeCollector,
         uint256 _platformFeeRate
-    ) {
+    ) Ownable(msg.sender) {
         require(_ethUsdPriceFeed != address(0), "Invalid ETH price feed");
         require(_feeCollector != address(0), "Invalid fee collector");
         require(_platformFeeRate <= MAX_FEE_RATE, "Fee rate too high");
@@ -227,11 +228,44 @@ contract EthSpenda is Ownable, ReentrancyGuard, Pausable {
         uint256 usdAmount = _getUSDValue(token, amount);
         require(usdAmount > 0, "Invalid USD conversion");
         
+        // Handle fee collection and transfer
+        uint256 transferAmount = _handleFeeAndTransfer(token, amount, requestId);
+        
+        // Update tracking variables
+        totalTransactions++;
+        totalVolumeUSD += usdAmount;
+        processedTransactions[requestId] = true;
+        
+        // Emit event for off-chain processing
+        emit TransferInitiated(
+            requestId,
+            msg.sender,
+            token,
+            transferAmount,
+            recipientPhone,
+            countryCode,
+            providerCode,
+            usdAmount,
+            block.timestamp
+        );
+        
+        return requestId;
+    }
+    
+    /**
+     * @dev Handle fee collection and token transfer (internal function to reduce stack depth)
+     */
+    function _handleFeeAndTransfer(
+        address token,
+        uint256 amount,
+        bytes32 requestId
+    ) internal returns (uint256 transferAmount) {
+        transferAmount = amount;
+        
         // Calculate and collect platform fee
-        uint256 feeAmount = 0;
         if (platformFeeRate > 0) {
-            feeAmount = (amount * platformFeeRate) / BASIS_POINTS;
-            amount = amount - feeAmount;
+            uint256 feeAmount = (amount * platformFeeRate) / BASIS_POINTS;
+            transferAmount = amount - feeAmount;
             
             if (token == address(0)) {
                 // ETH transfer
@@ -247,29 +281,11 @@ contract EthSpenda is Ownable, ReentrancyGuard, Pausable {
         
         // Transfer tokens to contract (they will be held until processing is complete)
         if (token != address(0)) {
-            IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+            IERC20(token).safeTransferFrom(msg.sender, address(this), transferAmount);
         }
         // ETH is already in the contract via msg.value
         
-        // Update tracking variables
-        totalTransactions++;
-        totalVolumeUSD += usdAmount;
-        processedTransactions[requestId] = true;
-        
-        // Emit event for off-chain processing
-        emit TransferInitiated(
-            requestId,
-            msg.sender,
-            token,
-            amount,
-            recipientPhone,
-            countryCode,
-            providerCode,
-            usdAmount,
-            block.timestamp
-        );
-        
-        return requestId;
+        return transferAmount;
     }
     
     /**
@@ -328,8 +344,18 @@ contract EthSpenda is Ownable, ReentrancyGuard, Pausable {
         require(price > 0, "Invalid price");
         require(updatedAt > block.timestamp - 3600, "Price data too old"); // 1 hour max age
         
-        uint8 decimals = priceFeed.decimals();
-        uint256 tokenDecimals = token == address(0) ? 18 : IERC20(token).decimals();
+        // For ERC20 tokens, we need to handle decimals differently
+        uint256 tokenDecimals;
+        if (token == address(0)) {
+            tokenDecimals = 18; // ETH has 18 decimals
+        } else {
+            // Try to get decimals, default to 18 if not available
+            try IERC20Metadata(token).decimals() returns (uint8 dec) {
+                tokenDecimals = dec;
+            } catch {
+                tokenDecimals = 18;
+            }
+        }
         
         // Convert to USD with proper decimal handling
         return (amount * uint256(price)) / (10 ** tokenDecimals);

@@ -1,9 +1,9 @@
-import "@nomicfoundation/hardhat-toolbox";
-import "@nomicfoundation/hardhat-verify";
-import "dotenv/config";
+require("@nomicfoundation/hardhat-toolbox");
+require("@nomicfoundation/hardhat-verify");
+require("dotenv").config();
 
 /** @type import('hardhat/config').HardhatUserConfig */
-const config = {
+module.exports = {
   solidity: {
     version: "0.8.24",
     settings: {
@@ -101,5 +101,3 @@ const config = {
     artifacts: "./artifacts",
   },
 };
-
-export default config;

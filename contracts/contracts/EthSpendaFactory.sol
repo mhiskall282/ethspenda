@@ -45,7 +45,7 @@ contract EthSpendaFactory is Ownable {
     
     // ============ Constructor ============
     
-    constructor() {
+    constructor() Ownable(msg.sender) {
         // Set default parameters for supported chains
         _setDefaultParams();
     }
@@ -62,7 +62,7 @@ contract EthSpendaFactory is Ownable {
         address ethUsdPriceFeed,
         address feeCollector,
         uint256 platformFeeRate
-    ) external onlyOwner returns (address) {
+    ) public onlyOwner returns (address) {
         require(deployedContracts[block.chainid] == address(0), "Already deployed on this chain");
         
         // Deploy new EthSpenda contract
