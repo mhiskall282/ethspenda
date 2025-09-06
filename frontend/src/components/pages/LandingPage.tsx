@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import { HeroSection } from '../sections/HeroSection';
 import { HowItWorksSection } from '../sections/HowItWorksSection';
 import { SupportedChainsSection } from '../sections/SupportedChainsSection';

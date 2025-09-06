@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, Wallet, Send, CheckCircle2, Shield, Zap, AlertCircle, X, Share2, Copy, ExternalLink, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ArrowUpDown, Wallet, Send, CheckCircle2, Shield, AlertTriangle, RefreshCw, Copy, Share2, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,54 +8,72 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
+import { useAccount } from 'wagmi';
+import { useEthSpenda, usePhoneValidation } from '@/hooks/useWeb3';
+import { useRealTimePrice } from '@/services/priceService';
+import { SUPPORTED_COUNTRIES, MOBILE_MONEY_PROVIDERS } from '@/config/web3';
 
 export function ConversionPage() {
-  const [isWalletConnected, setIsWalletConnected] = useState(false);
+  // Web3 hooks
+  const { isConnected } = useAccount();
+  const { 
+    initiateTransfer, 
+    isTransactionPending, 
+    transactionHash: contractTransactionHash,
+    minTransferAmount,
+    contractETHPrice
+  } = useEthSpenda();
+  
+  // Real-time price data
+  const { price: liveETHPrice, loading: priceLoading } = useRealTimePrice('ethereum');
+  
+  // Phone validation
+  const { validatePhone } = usePhoneValidation();
+  
+  // Use contract price if available, otherwise use live price
+  const ethPrice = contractETHPrice || liveETHPrice || 2500; // fallback to conservative price
+  
+  // UI State
   const [step, setStep] = useState<'form' | 'connecting' | 'confirming' | 'sending' | 'success' | 'error'>('form');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorType, setErrorType] = useState<'insufficient' | 'network' | 'validation' | 'unknown'>('unknown');
+  
+  // Form State
   const [amount, setAmount] = useState('');
   const [recipientNumber, setRecipientNumber] = useState('');
-  const [selectedChain, setSelectedChain] = useState('');
+  const [selectedNetwork, setSelectedNetwork] = useState('base');
   const [selectedCountry, setSelectedCountry] = useState('');
   const [selectedProvider, setSelectedProvider] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [transactionHash, setTransactionHash] = useState('');
-  const [errorType, setErrorType] = useState<'insufficient' | 'network' | 'general'>('general');
   const { toast } = useToast();
 
-  const chains = [
-    { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', logo: '⟠', description: 'Secure Layer 1' },
-    { id: 'base', name: 'Base', symbol: 'BASE', logo: '🔵', description: 'Fast Layer 2' },
+  // Networks - these could be expanded based on deployment
+  const networks = [
+    { id: 'base', name: 'Base', symbol: 'ETH', logo: '🔵', description: 'Fast & Low Cost' },
+    { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', logo: '⚡', description: 'Most Secure' },
     { id: 'lisk', name: 'Lisk', symbol: 'LSK', logo: '🟢', description: 'Developer Friendly' },
   ];
 
-  const countries = [
-    { id: 'kenya', name: 'Kenya', flag: '🇰🇪', providers: ['mpesa', 'airtel'] },
-    { id: 'nigeria', name: 'Nigeria', flag: '🇳🇬', providers: ['opay', 'kuda', 'mtn'] },
-    { id: 'ghana', name: 'Ghana', flag: '🇬🇭', providers: ['mtn', 'airtel'] },
-    { id: 'uganda', name: 'Uganda', flag: '🇺🇬', providers: ['mtn', 'airtel'] },
-  ];
+  // Use real data from config
+  const countries = SUPPORTED_COUNTRIES;
+  const providers = MOBILE_MONEY_PROVIDERS;
 
-  const providers = {
-    mpesa: { name: 'M-Pesa', icon: '📱' },
-    opay: { name: 'Opay', icon: '💳' },
-    kuda: { name: 'Kuda Bank', icon: '🏦' },
-    mtn: { name: 'MTN MoMo', icon: '📞' },
-    airtel: { name: 'Airtel Money', icon: '💰' },
-  };
+  // Derived data
+  const selectedCountryData = SUPPORTED_COUNTRIES.find(c => c.code === selectedCountry);
+  const availableProviders = selectedCountryData?.providers || [];
+
+  // Calculate USD equivalent
+  const usdEquivalent = (parseFloat(amount || '0') * ethPrice).toFixed(2);
 
   const handleConnectWallet = async () => {
-    setStep('connecting');
-    setTimeout(() => {
-      setIsWalletConnected(true);
-      setStep('form');
-      toast({
-        title: "Wallet Connected",
-        description: "MetaMask wallet connected successfully.",
-      });
-    }, 2000);
+    // The wallet connection is now handled by the Header component
+    // This function is kept for backward compatibility
+    toast({
+      title: "Wallet Connection",
+      description: "Please use the Connect Wallet button in the header.",
+    });
   };
 
   const validateForm = () => {
@@ -64,8 +82,8 @@ export function ConversionPage() {
     if (!amount || parseFloat(amount) <= 0) {
       newErrors.amount = 'Please enter a valid amount';
     }
-    if (!selectedChain) {
-      newErrors.chain = 'Please select a blockchain';
+    if (!selectedNetwork) {
+      newErrors.network = 'Please select a blockchain';
     }
     if (!selectedCountry) {
       newErrors.country = 'Please select a country';
@@ -90,636 +108,544 @@ export function ConversionPage() {
     setShowConfirmModal(false);
     setStep('sending');
     
-    // Generate mock transaction hash
-    const mockHash = '0x' + Math.random().toString(16).substr(2, 64);
-    setTransactionHash(mockHash);
-    
-    // Simulate transaction processing with potential errors
-    setTimeout(() => {
-      const random = Math.random();
-      if (random < 0.1) { // 10% chance of insufficient balance error
-        setErrorType('insufficient');
-        setStep('error');
-        setShowErrorModal(true);
-      } else if (random < 0.2) { // 10% chance of network error
-        setErrorType('network');
-        setStep('error');
-        setShowErrorModal(true);
-      } else { // 80% success rate
-        setStep('success');
-        setShowSuccessModal(true);
+    try {
+      // Validate inputs before sending
+      if (!amount || !recipientNumber || !selectedCountry || !selectedProvider) {
+        throw new Error('Please fill in all required fields');
       }
-    }, 3000);
+      
+      // Validate phone number
+      const phoneValidation = validatePhone(recipientNumber, selectedCountry);
+      if (!phoneValidation.isValid) {
+        throw new Error(phoneValidation.message || 'Invalid phone number');
+      }
+      
+      // Check minimum amount
+      const minAmount = parseFloat(minTransferAmount || '0.001');
+      if (parseFloat(amount) < minAmount) {
+        throw new Error(`Minimum transfer amount is ${minAmount} ETH`);
+      }
+      
+      // Initiate real blockchain transaction
+      await initiateTransfer(
+        '0x0000000000000000000000000000000000000000', // ETH address
+        amount,
+        recipientNumber,
+        selectedCountry,
+        selectedProvider
+      );
+      
+      // Transaction hash will be available from the hook
+      setStep('success');
+      setShowSuccessModal(true);
+      
+    } catch (error: any) {
+      console.error('Transaction failed:', error);
+      
+      // Set appropriate error type based on error message
+      if (error.message?.includes('insufficient')) {
+        setErrorType('insufficient');
+      } else if (error.message?.includes('network') || error.message?.includes('connection')) {
+        setErrorType('network');
+      } else if (error.message?.includes('phone') || error.message?.includes('minimum')) {
+        setErrorType('validation');
+      } else {
+        setErrorType('unknown');
+      }
+      
+      setStep('error');
+      setShowErrorModal(true);
+    }
   };
 
   const handleRetry = () => {
     setShowErrorModal(false);
     setStep('form');
-    setErrors({});
   };
 
   const resetForm = () => {
-    setShowSuccessModal(false);
-    setStep('form');
     setAmount('');
     setRecipientNumber('');
-    setSelectedChain('');
+    setSelectedNetwork('base');
     setSelectedCountry('');
     setSelectedProvider('');
     setErrors({});
-    setTransactionHash('');
+    setStep('form');
+    setShowSuccessModal(false);
+    setShowErrorModal(false);
   };
 
   const copyTransactionHash = () => {
-    navigator.clipboard.writeText(transactionHash);
-    toast({
-      title: "Copied!",
-      description: "Transaction hash copied to clipboard.",
-    });
-  };
-
-  const shareOnX = () => {
-    const text = `Just sent $${parseFloat(usdEquivalent).toLocaleString()} instantly to mobile money using @EthSpenda! 🚀 #DeFi #Africa #Crypto`;
-    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
-  };
-
-  const usdEquivalent = amount ? (parseFloat(amount) * 3250).toFixed(2) : '0.00';
-  const selectedCountryData = countries.find(c => c.id === selectedCountry);
-  const availableProviders = selectedCountryData?.providers || [];
-
-  const getErrorMessage = () => {
-    switch (errorType) {
-      case 'insufficient':
-        return {
-          title: 'Insufficient Balance',
-          description: 'You don\'t have enough ETH to complete this transaction.',
-          icon: AlertTriangle,
-        };
-      case 'network':
-        return {
-          title: 'Network Error',
-          description: 'Unable to connect to the blockchain network. Please try again.',
-          icon: AlertCircle,
-        };
-      default:
-        return {
-          title: 'Transaction Failed',
-          description: 'Something went wrong. Please try again.',
-          icon: X,
-        };
+    if (contractTransactionHash) {
+      navigator.clipboard.writeText(contractTransactionHash);
+      toast({
+        title: "Copied!",
+        description: "Transaction hash copied to clipboard",
+      });
     }
   };
 
-  const errorInfo = getErrorMessage();
-  const ErrorIcon = errorInfo.icon;
+  const shareTransaction = () => {
+    if (contractTransactionHash) {
+      const url = `https://etherscan.io/tx/${contractTransactionHash}`;
+      navigator.share({
+        title: 'EthSpenda Transaction',
+        text: 'Check out my crypto-to-mobile money transfer',
+        url: url,
+      }).catch(() => {
+        // Fallback to copying URL
+        navigator.clipboard.writeText(url);
+        toast({
+          title: "Link Copied!",
+          description: "Transaction link copied to clipboard",
+        });
+      });
+    }
+  };
 
   return (
-    <div className="min-h-screen py-8" role="main" aria-label="Crypto conversion interface">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-blue-900 dark:to-indigo-900">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="max-w-2xl mx-auto"
+        className="container mx-auto px-4 py-8"
       >
-        {/* Header */}
-        <header className="text-center mb-8">
-          <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-emerald-500 bg-clip-text text-transparent mb-4">
-            Convert & Send
-          </h1>
-          <p className="text-gray-600 dark:text-gray-300">
-            Send ETH and tokens to mobile money wallets instantly
-          </p>
-        </header>
+        <div className="max-w-2xl mx-auto">
+          {/* Header */}
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center mb-8"
+          >
+            <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
+              Send Crypto to Mobile Money
+            </h1>
+            <p className="text-lg text-gray-600 dark:text-gray-300">
+              Convert your cryptocurrency to mobile money in seconds
+            </p>
+          </motion.div>
 
-        <Card className="border-0 shadow-2xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl">
-          <CardHeader className="text-center pb-6">
-            <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">
-              Crypto to Mobile Money
-            </CardTitle>
-            <CardDescription className="text-gray-600 dark:text-gray-300">
-              Secure, instant, and fee-free transfers
-            </CardDescription>
-          </CardHeader>
+          <Card className="shadow-2xl border-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm">
+            <CardHeader className="space-y-1">
+              <CardTitle className="text-2xl font-semibold flex items-center gap-2">
+                <Send className="w-6 h-6 text-blue-600" />
+                Quick Transfer
+              </CardTitle>
+              <CardDescription>
+                Fast, secure, and affordable crypto-to-mobile money transfers
+              </CardDescription>
+            </CardHeader>
 
-          <CardContent className="space-y-6" role="form" aria-label="Conversion form">
-            <AnimatePresence mode="wait">
-              {!isWalletConnected ? (
-                <motion.div
-                  key="wallet-connect"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="text-center py-12"
-                >
-                  {step === 'connecting' ? (
-                    <div role="status" aria-live="polite" aria-label="Connecting wallet">
-                      <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        className="w-16 h-16 mx-auto mb-4"
-                        aria-hidden="true"
-                      >
-                        <div className="w-16 h-16 border-4 border-blue-200 dark:border-blue-700 border-t-blue-600 rounded-full"></div>
-                      </motion.div>
-                      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                        Connecting Wallet...
-                      </h3>
-                      <p className="text-gray-600 dark:text-gray-300">
-                        Please approve the connection in MetaMask
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-6">
-                      <div className="w-20 h-20 mx-auto bg-gradient-to-r from-blue-600 to-emerald-500 rounded-full flex items-center justify-center">
-                        <Wallet className="w-10 h-10 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                          Connect Your Wallet
-                        </h3>
-                        <p className="text-gray-600 dark:text-gray-300 mb-6">
-                          Connect MetaMask or WalletConnect to get started
-                        </p>
-                      </div>
-                      <Button
-                        onClick={handleConnectWallet}
-                        size="lg"
-                        className="h-12 px-8 bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-700 hover:to-emerald-600 text-white border-0 focus-ring"
-                        aria-label="Connect wallet to start sending crypto"
-                      >
-                        <Wallet className="w-5 h-5 mr-2" />
-                        Connect Wallet
-                      </Button>
-                    </div>
-                  )}
-                </motion.div>
-              ) : step === 'form' ? (
-                <motion.div
-                  key="conversion-form"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="space-y-6"
-                >
-                  {/* Chain Selection */}
-                  <div className="space-y-2">
-                    <Label htmlFor="chain">Blockchain Network</Label>
-                    <Select value={selectedChain} onValueChange={setSelectedChain}>
-                      <SelectTrigger 
-                        className={`h-12 focus-ring ${errors.chain ? 'border-red-500' : ''}`}
-                        aria-label="Select blockchain network"
-                        aria-describedby={errors.chain ? 'chain-error' : undefined}
-                      >
-                        <SelectValue placeholder="Select blockchain" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {chains.map((chain) => (
-                          <SelectItem key={chain.id} value={chain.id}>
-                            <div className="flex items-center space-x-3">
-                              <span className="text-lg">{chain.logo}</span>
-                              <div>
-                                <div className="font-medium">{chain.name}</div>
-                                <div className="text-sm text-gray-500">{chain.description}</div>
-                              </div>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.chain && <p id="chain-error" className="text-red-500 text-sm" role="alert">{errors.chain}</p>}
-                  </div>
-
-                  {/* Amount Input */}
-                  <div className="space-y-2">
-                    <Label htmlFor="amount">Amount (ETH)</Label>
-                    <div className="relative">
-                      <Input
-                        id="amount"
-                        type="number"
-                        step="0.001"
-                        placeholder="0.00"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        className={`text-lg h-12 pr-16 focus-ring ${errors.amount ? 'border-red-500' : ''}`}
-                        aria-label="Enter amount in ETH"
-                        aria-describedby={errors.amount ? 'amount-error' : 'amount-help'}
-                      />
-                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">
-                        ETH
-                      </div>
-                    </div>
-                    <p id="amount-help" className="text-sm text-gray-500 dark:text-gray-400">
-                      Minimum: 0.001 ETH
-                    </p>
-                    {errors.amount && <p id="amount-error" className="text-red-500 text-sm" role="alert">{errors.amount}</p>}
-                  </div>
-
-                  {/* USD Equivalent */}
-                  {amount && (
+            <CardContent className="space-y-6">
+              <AnimatePresence mode="wait">
+                {!isConnected ? (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="text-center py-8"
+                  >
                     <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 p-4 rounded-lg border border-blue-200/50 dark:border-blue-700/50"
-                      role="region"
-                      aria-label="USD conversion preview"
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+                      className="w-16 h-16 mx-auto mb-4 bg-blue-500 rounded-full flex items-center justify-center"
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-gray-600 dark:text-gray-300">USD Equivalent</span>
-                        <ArrowUpDown className="w-4 h-4 text-gray-400" />
-                      </div>
-                      <div 
-                        className="text-2xl font-bold text-gray-900 dark:text-white mt-1"
-                        aria-label={`${parseFloat(usdEquivalent).toLocaleString()} US dollars`}
-                      >
-                        ${parseFloat(usdEquivalent).toLocaleString()}
-                      </div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        Rate: 1 ETH = $3,250 USD
-                      </div>
+                      <Wallet className="w-8 h-8 text-white" />
                     </motion.div>
-                  )}
-
-                  {/* Country Selection */}
-                  <div className="space-y-2">
-                    <Label htmlFor="country">Country</Label>
-                    <Select value={selectedCountry} onValueChange={(value) => {
-                      setSelectedCountry(value);
-                      setSelectedProvider('');
-                    }}>
-                      <SelectTrigger 
-                        className={`h-12 focus-ring ${errors.country ? 'border-red-500' : ''}`}
-                        aria-label="Select recipient country"
-                        aria-describedby={errors.country ? 'country-error' : undefined}
-                      >
-                        <SelectValue placeholder="Select country" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {countries.map((country) => (
-                          <SelectItem key={country.id} value={country.id}>
-                            <div className="flex items-center space-x-3">
-                              <span className="text-lg">{country.flag}</span>
-                              <span className="font-medium">{country.name}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.country && <p id="country-error" className="text-red-500 text-sm" role="alert">{errors.country}</p>}
-                  </div>
-
-                  {/* Provider Selection */}
-                  <div className="space-y-2">
-                    <Label htmlFor="provider">Mobile Money Provider</Label>
-                    <Select 
-                      value={selectedProvider} 
-                      onValueChange={setSelectedProvider}
-                      disabled={!selectedCountry}
-                    >
-                      <SelectTrigger 
-                        className={`h-12 focus-ring ${errors.provider ? 'border-red-500' : ''}`}
-                        aria-label="Select mobile money provider"
-                        aria-describedby={errors.provider ? 'provider-error' : undefined}
-                        disabled={!selectedCountry}
-                      >
-                        <SelectValue placeholder="Select provider" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableProviders.map((providerId) => {
-                          const provider = providers[providerId as keyof typeof providers];
-                          return (
-                            <SelectItem key={providerId} value={providerId}>
+                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                      Connect Your Wallet
+                    </h3>
+                    <p className="text-gray-600 dark:text-gray-300 mb-6">
+                      Please connect your wallet to start sending transfers
+                    </p>
+                    <Button onClick={handleConnectWallet} size="lg" className="bg-blue-600 hover:bg-blue-700">
+                      <Wallet className="w-5 h-5 mr-2" />
+                      Connect Wallet
+                    </Button>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="space-y-6"
+                  >
+                    {/* Network Selection */}
+                    <div className="space-y-2">
+                      <Label htmlFor="network">Blockchain Network</Label>
+                      <Select value={selectedNetwork} onValueChange={setSelectedNetwork}>
+                        <SelectTrigger 
+                          className={`h-12 focus-ring ${errors.network ? 'border-red-500' : ''}`}
+                          aria-label="Select blockchain network"
+                          aria-describedby={errors.network ? 'network-error' : undefined}
+                        >
+                          <SelectValue placeholder="Select blockchain" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {networks.map((network) => (
+                            <SelectItem key={network.id} value={network.id}>
                               <div className="flex items-center space-x-3">
-                                <span className="text-lg">{provider.icon}</span>
-                                <span className="font-medium">{provider.name}</span>
+                                <span className="text-lg">{network.logo}</span>
+                                <div>
+                                  <div className="font-medium">{network.name}</div>
+                                  <div className="text-sm text-gray-500">{network.description}</div>
+                                </div>
                               </div>
                             </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                    {errors.provider && <p id="provider-error" className="text-red-500 text-sm" role="alert">{errors.provider}</p>}
-                  </div>
-
-                  {/* Phone Number */}
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Recipient Phone Number</Label>
-                    <Input
-                      id="phone"
-                      type="tel"
-                      placeholder="+234 901 234 5678"
-                      value={recipientNumber}
-                      onChange={(e) => setRecipientNumber(e.target.value)}
-                      className={`text-lg h-12 focus-ring ${errors.phone ? 'border-red-500' : ''}`}
-                      aria-label="Enter recipient phone number"
-                      aria-describedby={errors.phone ? 'phone-error' : 'phone-help'}
-                    />
-                    <p id="phone-help" className="text-sm text-gray-500 dark:text-gray-400">
-                      Include country code (e.g., +234 for Nigeria)
-                    </p>
-                    {errors.phone && <p id="phone-error" className="text-red-500 text-sm" role="alert">{errors.phone}</p>}
-                  </div>
-
-                  {/* Fee Display */}
-                  <div 
-                    className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg border border-emerald-200/50 dark:border-emerald-700/50"
-                    role="region"
-                    aria-label="Fee information"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <Zap className="w-5 h-5 text-emerald-600" />
-                        <span className="font-semibold text-emerald-800 dark:text-emerald-200">Transaction Fee</span>
-                      </div>
-                      <span className="text-2xl font-bold text-emerald-600" aria-label="Zero dollars fee">$0</span>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.network && <p id="network-error" className="text-red-500 text-sm" role="alert">{errors.network}</p>}
                     </div>
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-1">
-                      Only network gas fees apply
-                    </p>
-                  </div>
 
-                  {/* Safety Notes */}
-                  <div 
-                    className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200/50 dark:border-blue-700/50"
-                    role="region"
-                    aria-label="Security information"
-                  >
-                    <div className="flex items-start space-x-3">
-                      <Shield className="w-5 h-5 text-blue-600 mt-0.5" />
-                      <div>
-                        <h4 className="font-semibold text-blue-800 dark:text-blue-200 mb-1">Secure On-Chain Transaction</h4>
-                        <p className="text-sm text-blue-700 dark:text-blue-300">
-                          Your transaction is secured by blockchain technology. Funds are never held by EthSpenda.
-                        </p>
+                    {/* Amount Input */}
+                    <div className="space-y-2">
+                      <Label htmlFor="amount">Amount to Send</Label>
+                      <div className="relative">
+                        <Input
+                          id="amount"
+                          type="number"
+                          placeholder="0.00"
+                          value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          className={`text-2xl h-16 pr-16 focus-ring ${errors.amount ? 'border-red-500' : ''}`}
+                          aria-label="Amount to send"
+                          aria-describedby={errors.amount ? 'amount-error' : undefined}
+                        />
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">
+                          ETH
+                        </div>
                       </div>
+                      {errors.amount && <p id="amount-error" className="text-red-500 text-sm" role="alert">{errors.amount}</p>}
+                      
+                      {/* Price Display */}
+                      {amount && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 p-4 rounded-lg border border-blue-200/50 dark:border-blue-700/50"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-gray-600 dark:text-gray-300">You'll receive</span>
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          </div>
+                          <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+                            ≈ ${usdEquivalent} USD
+                          </div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                            Rate: 1 ETH = ${ethPrice.toLocaleString()} USD {priceLoading && '(Loading...)'}
+                          </div>
+                        </motion.div>
+                      )}
                     </div>
-                  </div>
 
-                  {/* Convert & Send Button */}
-                  <Button
-                    onClick={handleConvertSend}
-                    size="lg"
-                    className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-700 hover:to-emerald-600 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-300 focus-ring"
-                    aria-label="Convert and send crypto to mobile money"
-                  >
-                    <Send className="w-5 h-5 mr-2" />
-                    Convert & Send
-                  </Button>
-                </motion.div>
-              ) : step === 'sending' ? (
-                <motion.div
-                  key="sending"
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="text-center py-12"
-                  role="status"
-                  aria-live="polite"
-                  aria-label="Processing transaction"
-                >
-                  <motion.div
-                    animate={{ scale: [1, 1.1, 1] }}
-                    transition={{ duration: 1.5, repeat: Infinity }}
-                    className="w-16 h-16 mx-auto mb-4 bg-gradient-to-r from-blue-600 to-emerald-500 rounded-full flex items-center justify-center"
-                    aria-hidden="true"
-                  >
-                    <Send className="w-8 h-8 text-white" />
+                    {/* Country Selection */}
+                    <div className="space-y-2">
+                      <Label htmlFor="country">Recipient Country</Label>
+                      <Select value={selectedCountry} onValueChange={setSelectedCountry}>
+                        <SelectTrigger 
+                          className={`h-12 focus-ring ${errors.country ? 'border-red-500' : ''}`}
+                          aria-label="Select recipient country"
+                          aria-describedby={errors.country ? 'country-error' : undefined}
+                        >
+                          <SelectValue placeholder="Select country" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {countries.map((country) => (
+                            <SelectItem key={country.code} value={country.code}>
+                              <div className="flex items-center space-x-3">
+                                <span className="text-lg">{country.flag}</span>
+                                <span className="font-medium">{country.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.country && <p id="country-error" className="text-red-500 text-sm" role="alert">{errors.country}</p>}
+                    </div>
+
+                    {/* Provider Selection */}
+                    <div className="space-y-2">
+                      <Label htmlFor="provider">Mobile Money Provider</Label>
+                      <Select 
+                        value={selectedProvider} 
+                        onValueChange={setSelectedProvider}
+                        disabled={!selectedCountry}
+                      >
+                        <SelectTrigger 
+                          className={`h-12 focus-ring ${errors.provider ? 'border-red-500' : ''}`}
+                          aria-label="Select mobile money provider"
+                          aria-describedby={errors.provider ? 'provider-error' : undefined}
+                          disabled={!selectedCountry}
+                        >
+                          <SelectValue placeholder="Select provider" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableProviders.map((providerId) => {
+                            const provider = providers[providerId as keyof typeof providers];
+                            return (
+                              <SelectItem key={providerId} value={providerId}>
+                                <div className="flex items-center space-x-3">
+                                  <span className="text-lg">{provider.icon}</span>
+                                  <span className="font-medium">{provider.name}</span>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {errors.provider && <p id="provider-error" className="text-red-500 text-sm" role="alert">{errors.provider}</p>}
+                    </div>
+
+                    {/* Phone Number */}
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Recipient Phone Number</Label>
+                      <Input
+                        id="phone"
+                        type="tel"
+                        placeholder={selectedCountryData?.phoneFormat || "+234 901 234 5678"}
+                        value={recipientNumber}
+                        onChange={(e) => setRecipientNumber(e.target.value)}
+                        className={`text-lg h-12 focus-ring ${errors.phone ? 'border-red-500' : ''}`}
+                        aria-label="Enter recipient phone number"
+                        aria-describedby={errors.phone ? 'phone-error' : 'phone-help'}
+                      />
+                      <p id="phone-help" className="text-sm text-gray-500 dark:text-gray-400">
+                        Include country code (e.g., +234 for Nigeria)
+                      </p>
+                      {errors.phone && <p id="phone-error" className="text-red-500 text-sm" role="alert">{errors.phone}</p>}
+                    </div>
+
+                    {/* Action Button */}
+                    <motion.div
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <Button 
+                        onClick={handleConvertSend}
+                        disabled={isTransactionPending || step === 'sending'}
+                        className="w-full h-14 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                      >
+                        {step === 'sending' ? (
+                          <>
+                            <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-5 h-5 mr-2" />
+                            Send Transfer
+                          </>
+                        )}
+                      </Button>
+                    </motion.div>
+
+                    {/* Security Note */}
+                    <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                      <Shield className="w-4 h-4 text-green-500" />
+                      <span>Protected by blockchain security and smart contracts</span>
+                    </div>
                   </motion.div>
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                    Processing Transaction...
-                  </h3>
-                  <p className="text-gray-600 dark:text-gray-300 mb-4">
-                    Your transfer is being processed on the blockchain
-                  </p>
-                  {transactionHash && (
-                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg" role="region" aria-label="Transaction hash">
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mb-1">Transaction Hash:</p>
-                      <p className="font-mono text-xs text-blue-600 dark:text-blue-400 break-all" aria-label={`Transaction hash: ${transactionHash}`}>
-                        {transactionHash}
+                )}
+              </AnimatePresence>
+            </CardContent>
+          </Card>
+
+          {/* Confirmation Modal */}
+          <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-blue-600" />
+                  Confirm Transfer
+                </DialogTitle>
+                <DialogDescription>
+                  Please review your transfer details before confirming
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="space-y-4">
+                <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">Amount:</span>
+                    <span className="font-semibold">{amount} ETH</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">USD Value:</span>
+                    <span className="font-semibold">${parseFloat(usdEquivalent).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">Network:</span>
+                    <span className="font-semibold">{networks.find(n => n.id === selectedNetwork)?.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">Recipient:</span>
+                    <span className="font-semibold">{recipientNumber}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">Provider:</span>
+                    <span className="font-semibold">{providers[selectedProvider as keyof typeof providers]?.name}</span>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowConfirmModal(false)}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={handleConfirmTransaction}
+                    disabled={isTransactionPending}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  >
+                    {isTransactionPending ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Confirming...
+                      </>
+                    ) : (
+                      'Confirm Transfer'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Success Modal */}
+          <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-green-600">
+                  <CheckCircle2 className="w-5 h-5" />
+                  Transfer Successful!
+                </DialogTitle>
+                <DialogDescription>
+                  Your transfer has been completed successfully
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="space-y-4">
+                <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">Amount Sent:</span>
+                    <span className="font-semibold">${parseFloat(usdEquivalent).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">Network:</span>
+                    <span className="font-semibold">{networks.find(n => n.id === selectedNetwork)?.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">Recipient:</span>
+                    <span className="font-semibold">{recipientNumber}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-300">Provider:</span>
+                    <span className="font-semibold">{providers[selectedProvider as keyof typeof providers]?.name}</span>
+                  </div>
+                  
+                  {contractTransactionHash && (
+                    <div className="pt-2 border-t border-green-200 dark:border-green-700">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-300">Transaction:</span>
+                        <div className="flex space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={copyTransactionHash}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={shareTransaction}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Share2 className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            asChild
+                            className="h-8 w-8 p-0"
+                          >
+                            <a 
+                              href={`https://etherscan.io/tx/${contractTransactionHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                        {contractTransactionHash?.slice(0, 20)}...
                       </p>
                     </div>
                   )}
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-          </CardContent>
-        </Card>
-
-        {/* Confirmation Modal */}
-        <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
-          <DialogContent className="max-w-md" role="dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description">
-            <DialogHeader>
-              <DialogTitle id="confirm-title" className="flex items-center space-x-2">
-                <AlertCircle className="w-5 h-5 text-blue-600" />
-                <span>Confirm Transaction</span>
-              </DialogTitle>
-              <DialogDescription id="confirm-description">
-                Please review your transaction details before confirming.
-              </DialogDescription>
-            </DialogHeader>
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-4"
-            >
-              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg space-y-3" role="region" aria-label="Transaction summary">
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">Amount:</span>
-                  <span className="font-semibold">{amount} ETH</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">USD Value:</span>
-                  <span className="font-semibold">${parseFloat(usdEquivalent).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">Network:</span>
-                  <span className="font-semibold">{chains.find(c => c.id === selectedChain)?.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">Recipient:</span>
-                  <span className="font-semibold">{recipientNumber}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">Provider:</span>
-                  <span className="font-semibold">{providers[selectedProvider as keyof typeof providers]?.name}</span>
-                </div>
-                <div className="flex justify-between border-t pt-2">
-                  <span className="text-gray-600 dark:text-gray-300">Fee:</span>
-                  <span className="font-semibold text-emerald-600">$0</span>
+                
+                <div className="flex space-x-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowSuccessModal(false)}
+                    className="flex-1"
+                  >
+                    Close
+                  </Button>
+                  <Button 
+                    onClick={resetForm}
+                    className="flex-1 bg-green-600 hover:bg-green-700"
+                  >
+                    Send Another
+                  </Button>
                 </div>
               </div>
-              <div className="flex space-x-3" role="group" aria-label="Confirmation actions">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 focus-ring"
-                  aria-label="Cancel transaction"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleConfirmTransaction}
-                  className="flex-1 bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-700 hover:to-emerald-600 text-white border-0 focus-ring"
-                  aria-label="Confirm and send transaction"
-                >
-                  Confirm & Send
-                </Button>
-              </div>
-            </motion.div>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
 
-        {/* Success Modal */}
-        <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
-          <DialogContent className="max-w-md" role="dialog" aria-labelledby="success-title">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="text-center space-y-6"
-            >
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-                className="w-16 h-16 mx-auto bg-emerald-500 rounded-full flex items-center justify-center"
-                aria-hidden="true"
-              >
-                <CheckCircle2 className="w-8 h-8 text-white" />
-              </motion.div>
+          {/* Error Modal */}
+          <Dialog open={showErrorModal} onOpenChange={setShowErrorModal}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="w-5 h-5" />
+                  Transfer Failed
+                </DialogTitle>
+                <DialogDescription>
+                  {errorType === 'insufficient' && 'Insufficient funds for this transaction'}
+                  {errorType === 'network' && 'Network connection error. Please try again.'}
+                  {errorType === 'validation' && 'Please check your input and try again.'}
+                  {errorType === 'unknown' && 'An unexpected error occurred. Please try again.'}
+                </DialogDescription>
+              </DialogHeader>
               
-              <div>
-                <h3 id="success-title" className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mb-2">
-                  Funds Sent Successfully!
-                </h3>
-                <p className="text-gray-600 dark:text-gray-300">
-                  Your transaction has been completed
-                </p>
-              </div>
-
-              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg space-y-3 text-left" role="region" aria-label="Transaction details">
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">Amount Sent:</span>
-                  <span className="font-semibold">${parseFloat(usdEquivalent).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">Network:</span>
-                  <span className="font-semibold">{chains.find(c => c.id === selectedChain)?.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">Recipient:</span>
-                  <span className="font-semibold">{recipientNumber}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-300">Provider:</span>
-                  <span className="font-semibold">{providers[selectedProvider as keyof typeof providers]?.name}</span>
-                </div>
-              </div>
-
-              {transactionHash && (
-                <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg" role="region" aria-label="Transaction hash details">
-                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Transaction Hash:</p>
-                  <div className="flex items-center space-x-2">
-                    <p className="font-mono text-xs text-blue-600 dark:text-blue-400 break-all flex-1" aria-label={`Transaction hash: ${transactionHash}`}>
-                      {transactionHash.slice(0, 20)}...{transactionHash.slice(-10)}
-                    </p>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={copyTransactionHash}
-                      className="h-8 w-8 p-0 focus-ring"
-                      aria-label="Copy transaction hash"
-                    >
-                      <Copy className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 focus-ring"
-                      aria-label="View transaction on blockchain explorer"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex space-x-3" role="group" aria-label="Success actions">
-                <Button
-                  variant="outline"
-                  onClick={shareOnX}
-                  className="flex-1 focus-ring"
-                  aria-label="Share success on X (Twitter)"
-                >
-                  <Share2 className="w-4 h-4 mr-2" />
-                  Share on X
-                </Button>
-                <Button
-                  onClick={resetForm}
-                  className="flex-1 bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-700 hover:to-emerald-600 text-white border-0 focus-ring"
-                  aria-label="Send another transfer"
-                >
-                  Send Another
-                </Button>
-              </div>
-            </motion.div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Error Modal */}
-        <Dialog open={showErrorModal} onOpenChange={setShowErrorModal}>
-          <DialogContent className="max-w-md" role="dialog" aria-labelledby="error-title">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="text-center space-y-6"
-            >
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-                className="w-16 h-16 mx-auto bg-red-500 rounded-full flex items-center justify-center"
-                aria-hidden="true"
-              >
-                <ErrorIcon className="w-8 h-8 text-white" />
-              </motion.div>
-              
-              <div>
-                <h3 id="error-title" className="text-2xl font-bold text-red-600 dark:text-red-400 mb-2">
-                  {errorInfo.title}
-                </h3>
-                <p className="text-gray-600 dark:text-gray-300">
-                  {errorInfo.description}
-                </p>
-              </div>
-
-              {errorType === 'insufficient' && (
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200/50 dark:border-yellow-700/50" role="region" aria-label="Balance information">
-                  <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                    <strong>Current Balance:</strong> 0.5 ETH<br />
-                    <strong>Required:</strong> {amount} ETH + gas fees
-                  </p>
-                </div>
-              )}
-
-              <div className="flex space-x-3" role="group" aria-label="Error actions">
-                <Button
-                  variant="outline"
+              <div className="flex space-x-2">
+                <Button 
+                  variant="outline" 
                   onClick={() => setShowErrorModal(false)}
-                  className="flex-1 focus-ring"
-                  aria-label="Cancel and close error dialog"
+                  className="flex-1"
                 >
                   Cancel
                 </Button>
-                <Button
+                <Button 
                   onClick={handleRetry}
-                  className="flex-1 bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-700 hover:to-emerald-600 text-white border-0 focus-ring"
-                  aria-label="Try transaction again"
+                  className="flex-1 bg-red-600 hover:bg-red-700"
                 >
                   <RefreshCw className="w-4 h-4 mr-2" />
                   Try Again
                 </Button>
               </div>
-            </motion.div>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
+        </div>
       </motion.div>
     </div>
   );
