@@ -5,7 +5,6 @@ import { Footer } from './Footer';
 interface MainLayoutProps {
   children: ReactNode;
   onNavigate: (page: 'landing' | 'conversion') => void;
-  onNavigate: (page: 'landing' | 'conversion') => void;
 }
 
 export function MainLayout({ children, onNavigate }: MainLayoutProps) {

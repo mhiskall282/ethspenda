@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { Zap, Moon, Sun, Menu, Wallet } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 
@@ -11,6 +12,26 @@ interface HeaderProps {
 export function Header({ onNavigate }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { address, isConnected } = useAccount();
+  const { connect, connectors } = useConnect();
+  const { disconnect } = useDisconnect();
+
+  const formatAddress = (address: string) => {
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+
+  const handleWalletAction = () => {
+    if (isConnected) {
+      disconnect();
+    } else {
+      // Connect with the first available connector (usually MetaMask)
+      const connector = connectors[0];
+      if (connector) {
+        connect({ connector });
+      }
+    }
+    onNavigate('conversion');
+  };
 
   return (
     <motion.header
@@ -67,12 +88,12 @@ export function Header({ onNavigate }: HeaderProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => onNavigate('conversion')}
+            onClick={handleWalletAction}
             className="hidden md:flex items-center space-x-2 h-9 focus-ring"
-            aria-label="Connect wallet to start sending"
+            aria-label={isConnected ? "Disconnect wallet" : "Connect wallet to start sending"}
           >
             <Wallet className="w-4 h-4" />
-            <span>Connect Wallet</span>
+            <span>{isConnected ? formatAddress(address!) : "Connect Wallet"}</span>
           </Button>
           
           <Button
@@ -141,14 +162,14 @@ export function Header({ onNavigate }: HeaderProps) {
               variant="outline"
               size="sm"
               onClick={() => {
-                onNavigate('conversion');
+                handleWalletAction();
                 setIsMenuOpen(false);
               }}
               className="w-full flex items-center justify-center space-x-2 h-10 focus-ring"
-              aria-label="Connect wallet to start sending"
+              aria-label={isConnected ? "Disconnect wallet" : "Connect wallet to start sending"}
             >
               <Wallet className="w-4 h-4" />
-              <span>Connect Wallet</span>
+              <span>{isConnected ? formatAddress(address!) : "Connect Wallet"}</span>
             </Button>
           </nav>
         </motion.div>

@@ -5,11 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TokenSelector } from './TokenSelector';
 import { NetworkSelector } from './NetworkSelector';
 import { MobileMoneySelector } from './MobileMoneySelector';
 import { useToast } from '@/hooks/use-toast';
+import { useRealTimePrice } from '@/services/priceService';
 
 export function ConversionForm() {
   const [step, setStep] = useState<'form' | 'connecting' | 'sending' | 'success'>('form');
@@ -19,6 +19,10 @@ export function ConversionForm() {
   const [selectedNetwork, setSelectedNetwork] = useState('ethereum');
   const [selectedProvider, setSelectedProvider] = useState('');
   const { toast } = useToast();
+  
+  // Real-time price data
+  const { price: ethPrice, loading: priceLoading } = useRealTimePrice('ethereum');
+  const currentETHPrice = ethPrice || 2500; // fallback price
 
   const handleConnect = async () => {
     setStep('connecting');
@@ -118,10 +122,10 @@ export function ConversionForm() {
                       <ArrowUpDown className="w-4 h-4 text-gray-400" />
                     </div>
                     <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                      ≈ ${(parseFloat(amount) * 3250).toLocaleString()} USD
+                      ≈ ${(parseFloat(amount) * currentETHPrice).toLocaleString()} USD
                     </div>
                     <div className="text-sm text-gray-500 dark:text-gray-400">
-                      Rate: 1 ETH = $3,250 USD
+                      Rate: 1 ETH = ${currentETHPrice.toLocaleString()} USD {priceLoading && '(Loading...)'}
                     </div>
                   </motion.div>
                 )}
@@ -138,7 +142,7 @@ export function ConversionForm() {
                   <Input
                     id="recipient"
                     type="tel"
-                    placeholder="+234 901 234 5678"
+                    placeholder="Enter phone number with country code"
                     value={recipientNumber}
                     onChange={(e) => setRecipientNumber(e.target.value)}
                     className="text-lg"
@@ -237,7 +241,7 @@ export function ConversionForm() {
                   Transfer Successful!
                 </h3>
                 <p className="text-gray-600 dark:text-gray-300 mb-6">
-                  ${(parseFloat(amount || '0') * 3250).toLocaleString()} USD has been sent to {recipientNumber}
+                  ${(parseFloat(amount || '0') * currentETHPrice).toLocaleString()} USD has been sent to {recipientNumber}
                 </p>
                 <Button onClick={resetForm} variant="outline">
                   Send Another Transfer

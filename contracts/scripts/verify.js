@@ -6,7 +6,7 @@ const hre = require("hardhat");
 async function main() {
   console.log("🔍 Verifying EthSpenda Smart Contracts...\n");
 
-  // Contract addresses from deployment (update these with actual addresses)
+  // Contract addresses from latest deployment
   const FACTORY_ADDRESS = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
   const ETHSPENDA_ADDRESS = "0xCafac3dD18aC6c6e92c921884f9E4176737C052c";
 
